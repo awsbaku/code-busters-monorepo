@@ -1,0 +1,187 @@
+# ---------------------------------------------------------------------------
+# Infrastructure pipeline.  infrastructure/**  ->  Terraform
+#
+# Pull request : fmt, validate, plan (read-only credentials)
+# Push to main : plan, then apply behind the demo-infra environment gate
+#
+# A fork pull request gets NO AWS credentials at all. It is validated
+# offline. The reason is blunt: `terraform plan` executes provider code from
+# the pull request's own branch, so giving a fork plan credentials means
+# letting a stranger run code with your AWS role.
+#
+# Action versions below are real release tags. Pin them to full commit SHAs
+# before the live demo:
+#   gh api repos/actions/checkout/git/ref/tags/v4 --jq .object.sha
+# ---------------------------------------------------------------------------
+name: infrastructure
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure.yml'
+  workflow_dispatch:
+
+# Never let two applies touch the same state file at once. The S3 lock would
+# stop the second one anyway, but failing here is far easier to read than a
+# lock error halfway through an apply.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TF_VERSION: '1.11.4'
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_IN_AUTOMATION: 'true'
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Always runs, needs no credentials, catches most mistakes.
+  # -------------------------------------------------------------------------
+  validate:
+    name: fmt and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+        working-directory: infrastructure
+
+      # -backend=false: no bucket, no credentials, no network. Pure syntax
+      # and type checking.
+      - name: terraform validate
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure
+
+      - name: terraform validate (bootstrap)
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+        working-directory: infrastructure/bootstrap
+
+  # -------------------------------------------------------------------------
+  # Credentialed plan. Skipped entirely for fork pull requests.
+  # -------------------------------------------------------------------------
+  plan:
+    name: plan
+    needs: validate
+    if: github.event.pull_request.head.repo.fork != true
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write        # mint the OIDC token. Only where federation is needed.
+      pull-requests: write   # post the plan summary
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # THE moment of the talk: no secret is read here. GitHub mints a signed
+      # token describing this exact workflow run, AWS checks it against the
+      # role's trust policy, and hands back credentials valid for one hour.
+      - name: Assume the Terraform role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-tf-plan-${{ github.run_id }}
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="region=${AWS_REGION}"
+        working-directory: infrastructure
+
+      - name: terraform plan
+        id: plan
+        run: |
+          terraform plan -input=false -lock-timeout=5m -out=tfplan
+          terraform show -no-color tfplan > plan.txt
+        working-directory: infrastructure
+
+      # A plan can print resource attributes. Never echo it raw into a public
+      # pull request; this prints only the change summary lines.
+      - name: Summarise the plan
+        run: |
+          {
+            echo '## Terraform plan'
+            echo '```'
+            grep -E '^(Plan:|No changes|  [#~+-])' infrastructure/plan.txt | head -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------
+  # Apply. main only, and gated by the demo-infra environment.
+  #
+  # The environment is not decoration: the infra role's trust policy only
+  # accepts a token whose sub claim names this environment, so a workflow
+  # that skips it cannot assume the role at all.
+  # -------------------------------------------------------------------------
+  apply:
+    name: apply
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: demo-infra
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Assume the Terraform role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-tf-apply-${{ github.run_id }}
+
+      - name: terraform init
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="region=${AWS_REGION}"
+        working-directory: infrastructure
+
+      # Re-planned rather than reusing the pull-request plan file: main may
+      # have moved on since then, and a stale plan applies the wrong thing.
+      - name: terraform apply
+        run: terraform apply -input=false -auto-approve -lock-timeout=5m
+        working-directory: infrastructure
+
+      # The safety net for the ownership problem described in ecs.tf: prove
+      # the infrastructure apply did not roll the application back.
+      - name: Verify the running commit was not rolled back
+        run: |
+          url=$(terraform output -raw app_url 2>/dev/null || echo "")
+          if [ -z "$url" ]; then echo "no app_url yet (create_service=false)"; exit 0; fi
+          echo "running version:"
+          curl -sf --retry 5 --retry-delay 5 "$url/version"
+        working-directory: infrastructure

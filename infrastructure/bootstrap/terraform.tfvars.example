@@ -1,0 +1,35 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is git-ignored.
+
+project_name = "code-busters"
+environment  = "demo"
+aws_region   = "eu-central-1"
+
+github_owner = "awsbaku"
+github_repo  = "code-busters-monorepo"
+
+# Leave empty to derive code-busters-tfstate-<account-id>, which is globally
+# unique by construction.
+state_bucket_name = ""
+
+# An AWS account can hold only ONE OIDC provider for GitHub. If one already
+# exists, set create_oidc_provider = false and paste its ARN below.
+create_oidc_provider       = true
+existing_oidc_provider_arn = ""
+
+# ---------------------------------------------------------------------------
+# OIDC subject claims. VERIFY THESE AGAINST THE REAL REPOSITORY FIRST.
+#
+# The values below are the LEGACY format (repository created before
+# 15 July 2026). A repository created on or after that date uses the
+# immutable format built from numeric owner and repository IDs instead, and
+# these values will simply never match. See docs/BOOTSTRAP.md step 2.
+# ---------------------------------------------------------------------------
+
+infra_role_subjects = [
+  "repo:awsbaku/code-busters-monorepo:environment:demo-infra",
+]
+
+app_role_subjects = [
+  "repo:awsbaku/code-busters-monorepo:ref:refs/heads/main",
+  "repo:awsbaku/code-busters-monorepo:environment:demo-app",
+]

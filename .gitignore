@@ -1,0 +1,29 @@
+# --- Terraform ---------------------------------------------------------------
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+*.tfplan
+tfplan
+tfplan.txt
+.terraformrc
+terraform.rc
+# bootstrap/backend.tf is generated locally during the state migration step
+infrastructure/bootstrap/backend.tf
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# --- Local -------------------------------------------------------------------
+.env
+.DS_Store
