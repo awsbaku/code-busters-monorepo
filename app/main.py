@@ -1,4 +1,4 @@
-"""Code Buster — the demo application.
+"""Code Buster, the demo application.
 
 Three endpoints, and that is the whole app:
 
@@ -151,7 +151,7 @@ family=JetBrains+Mono:wght@400;700&family=Open+Sans:wght@400;600;800&display=swa
     <div class="badge"><span class="dot"></span>Live on AWS Fargate</div>
     <h1>Hello,<br><em>Code Busters</em></h1>
     <p class="lede">This page was a commit a few minutes ago. GitHub Actions tested it,
-       built it into a container, pushed it to Amazon ECR and rolled it out — with no
+       built it into a container, pushed it to Amazon ECR and rolled it out, with no
        AWS access keys anywhere.</p>
     <div class="cards">
       <div class="card"><span>Version</span><strong>{{VERSION}}</strong></div>
