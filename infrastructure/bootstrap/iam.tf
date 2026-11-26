@@ -139,6 +139,7 @@ data "aws_iam_policy_document" "terraform_provision" {
       "route53:ChangeResourceRecordSets",
       "route53:ListResourceRecordSets",
       "route53:GetHostedZone",
+      "route53:ListTagsForResource",
     ]
     resources = ["arn:aws:route53:::hostedzone/${var.hosted_zone_id}"]
   }
