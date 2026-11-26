@@ -180,8 +180,15 @@ jobs:
       # the infrastructure apply did not roll the application back.
       - name: Verify the running commit was not rolled back
         run: |
-          url=$(terraform output -raw app_url 2>/dev/null || echo "")
-          if [ -z "$url" ]; then echo "no app_url yet (create_service=false)"; exit 0; fi
+          # -json, not -raw. The setup-terraform wrapper writes its own noise
+          # to stdout, so `output -raw` on a MISSING output returns a
+          # non-empty string rather than nothing — which then reaches curl as
+          # a malformed URL. Phase 1 and phase 2 have no app_url at all.
+          url=$(terraform output -json 2>/dev/null | jq -r '.app_url.value // empty' || true)
+          if [ -z "$url" ]; then
+            echo "no app_url in this phase yet — nothing to verify"
+            exit 0
+          fi
           echo "running version:"
           curl -sf --retry 5 --retry-delay 5 "$url/version"
         working-directory: infrastructure
