@@ -28,19 +28,42 @@ resource "aws_ecr_repository" "this" {
 }
 
 # Images are tagged with commit SHAs, so they accumulate without this.
+#
+# The obvious single rule — tagStatus "any", keep the 10 newest — ate the seed
+# image. Every pipeline deploy pushes THREE artifacts, not one: the image plus
+# two untagged attestation manifests from buildx. Four deploys is twelve
+# images, and the oldest thing in the repository is the seed, which is the one
+# image the demo cannot lose.
+#
+# So: sweep the untagged attestations on their own, and count only tagged
+# images for the cap.
 resource "aws_ecr_lifecycle_policy" "this" {
   repository = aws_ecr_repository.this.name
 
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep the 10 most recent images"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = 10
-      }
-      action = { type = "expire" }
-    }]
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Expire untagged attestation manifests after a day"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 1
+        }
+        action = { type = "expire" }
+      },
+      {
+        rulePriority = 2
+        description  = "Keep the 20 most recent tagged images"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = 20
+        }
+        action = { type = "expire" }
+      },
+    ]
   })
 }

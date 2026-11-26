@@ -13,7 +13,8 @@
 # Usage:
 #   ./scripts/demo-reset.sh aws     # destroy the AWS resources only
 #   ./scripts/demo-reset.sh git     # rewind the repository only
-#   ./scripts/demo-reset.sh all     # both, AWS first
+#   ./scripts/demo-reset.sh seed    # rebuild and push the seed image only
+#   ./scripts/demo-reset.sh all     # all of it, in the right order
 #   ./scripts/demo-reset.sh check   # verify a reset is complete, change nothing
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -112,6 +113,42 @@ check_aws() {
 
   return $left
 }
+# ---------------------------------------------------------------------------
+# Rebuild and push the seed image from the CURRENT application code.
+#
+# Phase 3 creates an ECS service that pulls :seed the moment it exists. No
+# seed means the tasks never start, the circuit breaker rolls the apply back,
+# and that happens in front of the room. This runs on every reset for two
+# reasons: it guarantees the tag exists, and it keeps the seed in step with
+# the app, so the page that appears in phase 3 is not a build from weeks ago.
+seed_image() {
+  say "Rebuilding the seed image"
+
+  local acct repo
+  acct=$(aws sts get-caller-identity --query Account --output text)
+  repo="${acct}.dkr.ecr.${REGION}.amazonaws.com/code-busters-demo"
+
+  aws ecr get-login-password --region "$REGION" \
+    | docker login --username AWS --password-stdin \
+        "${acct}.dkr.ecr.${REGION}.amazonaws.com"
+
+  # --provenance=false stops buildx pushing two extra untagged manifests per
+  # build. Those are what overran the old lifecycle rule and expired the seed.
+  docker build --provenance=false \
+    --build-arg APP_VERSION=0.1.0 \
+    --build-arg APP_COMMIT="$(git rev-parse HEAD)" \
+    -t "${repo}:seed" "$HERE/app"
+
+  # Tags are immutable, so an existing :seed has to go first.
+  aws ecr batch-delete-image --region "$REGION" \
+    --repository-name code-busters-demo \
+    --image-ids imageTag=seed >/dev/null 2>&1 || true
+
+  docker push "${repo}:seed"
+  ok "seed pushed from $(git rev-parse --short HEAD)"
+}
+
+
 
 # ---------------------------------------------------------------------------
 # The phase branches are GENERATED from main, never merged into it and never
@@ -233,9 +270,10 @@ MSG
 case "${1:-}" in
   aws)   destroy_aws; check_aws ;;
   git)   rewind_git ;;
-  all)   destroy_aws; check_aws; rewind_git ;;
+  seed)  seed_image ;;
+  all)   destroy_aws; rewind_git; seed_image; check_aws ;;
   check) check_aws ;;
-  *)     echo "usage: $0 {aws|git|all|check}" >&2; exit 2 ;;
+  *)     echo "usage: $0 {aws|git|seed|all|check}" >&2; exit 2 ;;
 esac
 
 say "Done"

@@ -57,16 +57,81 @@ only ever move forward. The phase branches are force-pushed with
 `--force-with-lease`; the ruleset on them blocks *deletion*, which a
 force-push is not.
 
-## Order matters, in one specific way
+## The teardown is a demo beat, and it is tested
 
-**Always destroy AWS before rewinding git.**
+**Verified on 26 November 2026**, against the live stack:
 
-`terraform destroy` reads the configuration to know what to destroy. After the
-rewind, `main` no longer contains `phase-*.tf`, so Terraform sees an empty
-configuration, and the VPC, NAT gateways and load balancer are orphaned in the
-account with no code describing them. Recovering from that is manual console
-work. The script refuses to run `aws` from a checkout with no phase files for
-exactly this reason.
+```
+git push --force origin dev:main
+  -> infrastructure workflow only
+  -> Plan: 0 to add, 0 to change, 43 to destroy
+  -> Apply complete! Resources: 0 added, 0 changed, 43 destroyed
+  -> green, 3 min 40 s
+```
+
+Afterwards: no VPC, no NAT gateways, no Elastic IPs, no load balancer, no ECS
+cluster, no certificate, no DNS record. The account was clean.
+
+This is worth doing on stage, as the closing move. The line is something like:
+
+> "We never wrote a teardown script. The pipeline applies whatever the
+> repository says, and the repository now says there is no infrastructure.
+> Watch."
+
+It lands because it is the same mechanism the audience just watched build
+everything, running in reverse, with nobody typing `destroy`. It is the most
+honest possible demonstration that the repository — not a console, not a
+runbook — is the source of truth.
+
+**The application pipeline does not run.** `app/` is identical on `dev` and
+`main`, so the path filter excludes it. Only `infrastructure/**` changed. That
+is a second point worth making out loud: the two pipelines are genuinely
+independent, and you can prove it in the Actions tab.
+
+### Do not add `[skip ci]`
+
+You may be tempted, since a reset you have already destroyed by hand produces
+a no-op run. Don't:
+
+- The no-op apply (`0 to add, 0 to change, 0 to destroy`, ~90 s) is free
+  verification that state and configuration agree before you walk on stage.
+- GitHub applies skip instructions only to "the workflow run(s) that would be
+  triggered by the commit that contains the skip instructions". The head
+  commit of this force-push is **dev's tip**, so the marker would have to live
+  permanently in dev's tip message and be re-applied on every cherry-pick.
+
+Maintaining a permanent marker to avoid a 90-second confirmation is a bad
+trade.
+
+## Two ways to tear down, both valid
+
+**On stage — let the pipeline do it.** Force-push `dev` onto `main` and watch
+the infrastructure workflow destroy 43 resources. Tested, green, 3m40s. This
+is the demo beat above.
+
+```bash
+git push --force origin dev:main
+```
+
+**Off stage — destroy by hand first.** When you want the teardown finished
+before you touch git, or you are tidying up after a failed run:
+
+```bash
+cd infrastructure && terraform destroy
+git push --force origin dev:main        # now a no-op apply
+```
+
+### The rule that applies to both
+
+Never rewind `main` and then try to `terraform destroy` locally. `destroy`
+reads the configuration to know what to destroy; once `main` has no
+`phase-*.tf`, Terraform sees an empty configuration and the VPC, NAT gateways
+and load balancer are orphaned with no code describing them. Recovering means
+console work.
+
+Either destroy first, or let the pipeline destroy as part of the push. What
+you must not do is rewind, *then* reach for the local CLI. `demo-reset.sh aws`
+refuses to run from a checkout with no phase files for exactly this reason.
 
 ## The run itself
 
@@ -76,20 +141,40 @@ exactly this reason.
 | Merge PR 2 | ~1 min. Nothing runs yet |
 | Merge PR 3 | ~5 min, including the silent ACM validation wait |
 | Push an app change | The deploy workflow, then `/version` on the live URL |
-| `./scripts/demo-reset.sh all` | ~6 min |
+| `git push --force origin dev:main` | ~4 min. The pipeline destroys 43 resources |
+| `./scripts/demo-reset.sh all` | ~8 min including the seed rebuild |
 
 ## What survives a reset, deliberately
 
 The bootstrap is never touched:
 
-- the Terraform state bucket
+- the Terraform state bucket (holding only `demo/terraform.tfstate`)
 - the two IAM roles and the OIDC trust
-- the ECR repository **and the `seed` image**
+- the ECR repository
 
-The seed image is the one that matters. Phase 3 creates an ECS service that
-pulls `:seed` immediately; with no image there, the service never reaches a
-steady state and the apply fails in front of the room. `check` verifies it is
-still present.
+Keeping the bootstrap is deliberate. Tearing it down and rebuilding it every
+time would mean emptying a versioned bucket by hand on every rehearsal, for no
+teaching benefit — and the bootstrap is better *shown* than re-run: open it,
+walk through `terraform plan`, explain why this one stack is the only thing a
+human runs.
+
+**The seed image is rebuilt, not preserved.** It used to be in the list above,
+and that was wrong: on 26 November the lifecycle policy expired it. Every
+pipeline deploy pushes three artifacts — the image plus two untagged buildx
+attestation manifests — so four deploys blew past a `tagStatus: any, keep 10`
+rule and evicted the oldest thing in the repository, which was the seed.
+
+Two fixes, both in place:
+
+- the policy now sweeps untagged manifests separately and counts only tagged
+  images, with a cap of 20
+- `demo-reset.sh seed` rebuilds and re-pushes `:seed` from the current `app/`
+  on every reset, so it can neither go missing nor drift out of date
+
+Phase 3 creates an ECS service that pulls `:seed` the moment it exists. With
+no image there, the tasks never start, the circuit breaker rolls the apply
+back, and it happens in front of the room. `check` fails loudly if it is
+absent.
 
 ## Two things that will bite on a re-run
 
@@ -104,16 +189,13 @@ aws ecr batch-delete-image --region eu-central-1 \
   --repository-name code-busters-demo --image-ids imageTag=<sha>
 ```
 
-**Taking the phases off main triggers an apply.** `main` runs the
-infrastructure workflow whenever `infrastructure/**` changes, and removing the
-three phase files is such a change. If resources still exist in state at that
-moment, the pipeline sees a configuration describing nothing and applies it:
-a full destroy, through CI, unattended, with nobody watching the output.
+**Any push that removes the phase files destroys everything.** That is the
+feature above, and it is also the footgun: it does not care whether you meant
+it. A stray force-push of `dev` onto `main` mid-rehearsal takes the whole
+stack down. There is no confirmation step, because a pipeline applying what
+the repository says is the entire point.
 
-It would even work. Relying on it would not — a circuit-breaker rollback or an
-expired role mid-run leaves you half torn down with a talk to give. Destroy
-first, deliberately, and this push becomes a no-op. That is the second reason
-for the ordering rule above.
+Know which of the two teardown paths you are on before you push.
 
 ## If the destroy fails halfway
 
