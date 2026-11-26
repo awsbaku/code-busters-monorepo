@@ -3,9 +3,10 @@
 #
 # The door, the name on it, and the tenants. A load balancer in the public
 # subnets, a TLS certificate proved by DNS, a real hostname pointed at it,
-# and the service that finally runs the blueprint from phase 2.
+# a listener that answers ONLY to that name, and the service that finally
+# runs the blueprint from phase 2.
 #
-#   plan: 11 resources       apply: ~5 minutes
+#   plan: 12 resources       apply: ~5 minutes
 #
 # Keep the URL open while this applies. The load balancer answers about two
 # minutes before the first task passes its health check, so the page goes
@@ -157,7 +158,36 @@ resource "aws_lb_listener" "https" {
   ssl_policy      = "ELBSecurityPolicy-TLS13-1-2-2021-06"
   certificate_arn = aws_acm_certificate_validation.this.certificate_arn
 
+  # The DEFAULT action refuses. A load balancer answers on its own generated
+  # DNS name whether you want it to or not, and that name is public. Without
+  # this, anyone who finds the ALB hostname gets the application; worse, so
+  # does any stranger who points their own domain at it.
+  #
+  # Default-deny, then allow one name explicitly. The rule below is the only
+  # path to the application.
   default_action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "text/plain"
+      message_body = "Not found"
+      status_code  = "404"
+    }
+  }
+}
+
+# The one name that gets through. Everything else falls to the 404 above.
+resource "aws_lb_listener_rule" "host" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 100
+
+  condition {
+    host_header {
+      values = [local.fqdn]
+    }
+  }
+
+  action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.this.arn
   }
