@@ -13,25 +13,32 @@ from the wrong state.
 ./scripts/demo-reset.sh all     # both, AWS first
 ```
 
-## The anchors
+## The phase branches are generated, not maintained
 
-Four git tags pin the starting line. They were pushed before the first
-rehearsal and should never move:
+There are no anchor tags any more. `main` is the single source of truth, and
+each phase branch is **main plus exactly one more phase file**, rebuilt from
+scratch on every reset:
 
 ```
-demo-start/main            (moves when main gains tooling; the tag is the truth)
-demo-start/iac-phase-1     b4ee25b
-demo-start/iac-phase-2     9787231
-demo-start/iac-phase-3     89172b2
+main            workflows, app, docs, shared Terraform, no phases
+iac-phase-1     main + phase-1-network.tf
+iac-phase-2     main + phase-1 + phase-2-compute.tf
+iac-phase-3     main + phase-1 + phase-2 + phase-3-delivery.tf
 ```
 
-Read them with `git rev-parse --short demo-start/main` rather than trusting
-this page — `main` legitimately moves when tooling lands on it, and the tag is
-re-pointed at the same time.
+This is why the branches can never go stale: they do not persist between
+rehearsals, they are regenerated from whatever main currently holds.
 
-The rewind is a force-push of each tag onto its branch. `main` has no branch
-protection, which is what makes this possible — and is also why nobody else
-should be pushing to this repository during the talk.
+**Do not try to keep them up to date by merging main into them.** It looks
+like the obvious move and it is wrong. By the time you want to sync, main is
+carrying all three phase files, so merging it into `iac-phase-1` hands phase 1
+the entire stack and its pull request proposes everything at once. The
+incremental demo is gone.
+
+Taking the phases off main is a **normal commit**, not a force-push — history
+grows rather than being rewritten. Only the three phase branches are
+force-pushed (`--force-with-lease`), and the repository ruleset blocks
+*deleting* them, which force-pushing is not.
 
 ## Order matters, in one specific way
 
@@ -71,7 +78,7 @@ still present.
 
 **ECR tags are immutable.** The application pipeline pushes `:$GITHUB_SHA`. If
 you rehearse the application demo and then re-run the *same commit* at the
-real talk, the push fails — the tag already exists. Make a fresh commit for
+real talk, the push fails: the tag already exists. Make a fresh commit for
 the live demo (changing the greeting text is the natural one), or delete that
 tag first:
 
@@ -80,12 +87,16 @@ aws ecr batch-delete-image --region eu-central-1 \
   --repository-name code-busters-demo --image-ids imageTag=<sha>
 ```
 
-**Force-pushing main can trigger an apply.** `main` runs the infrastructure
-workflow on push when `infrastructure/**` changes. Rewinding main while
-resources still exist in state means the pipeline sees a configuration with no
-phase files and applies that — a destroy, through the pipeline, unattended.
-Destroying first makes the question moot, which is the other reason for the
-order above.
+**Taking the phases off main triggers an apply.** `main` runs the
+infrastructure workflow whenever `infrastructure/**` changes, and removing the
+three phase files is such a change. If resources still exist in state at that
+moment, the pipeline sees a configuration describing nothing and applies it:
+a full destroy, through CI, unattended, with nobody watching the output.
+
+It would even work. Relying on it would not — a circuit-breaker rollback or an
+expired role mid-run leaves you half torn down with a talk to give. Destroy
+first, deliberately, and this push becomes a no-op. That is the second reason
+for the ordering rule above.
 
 ## If the destroy fails halfway
 

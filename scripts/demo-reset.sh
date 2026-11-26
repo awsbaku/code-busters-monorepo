@@ -114,39 +114,124 @@ check_aws() {
 }
 
 # ---------------------------------------------------------------------------
+# The phase branches are GENERATED from main, never merged into it and never
+# hand-maintained. That is the only arrangement that keeps them current: main
+# carries the workflows, the app, the docs and the shared Terraform, and each
+# branch is main plus exactly one more phase file.
+#
+# Syncing them any other way is actively wrong. `git merge main` into
+# iac-phase-1 would bring main's copies of phase 2 and phase 3 along with it,
+# and phase 1's pull request would propose the entire stack at once.
 rewind_git() {
   say "Rewinding the repository"
 
-  git fetch --tags --force origin
+  git fetch --prune origin
+  git checkout -q main
+  git pull -q --ff-only origin main
 
-  # Force-push is the point of this function, so be loud about what it rewrites.
-  for b in main iac-phase-1 iac-phase-2 iac-phase-3; do
-    git push --force origin "refs/tags/demo-start/${b}:refs/heads/${b}"
-    echo "  ${b} -> $(git rev-parse --short "refs/tags/demo-start/${b}")"
+  local phases=(infrastructure/phase-1-network.tf
+                infrastructure/phase-2-compute.tf
+                infrastructure/phase-3-delivery.tf)
+
+  local stash
+  stash="$(mktemp -d)"
+  for f in "${phases[@]}"; do
+    if [ ! -f "$f" ]; then
+      echo "ERROR: $f is not on main." >&2
+      echo "main is already at the starting line, or something removed it." >&2
+      echo "Nothing was changed." >&2
+      rm -rf "$stash"; exit 1
+    fi
+    cp "$f" "$stash/"
+  done
+
+  # 1. main goes back to carrying no phases. A normal commit, not a force
+  #    push: history grows instead of being rewritten, so nothing that
+  #    references these commits breaks.
+  say "Taking the phases off main"
+  git rm -q "${phases[@]}"
+  git commit -q -m "Reset: take the phase files back off main
+
+The demo starts from a main that has every workflow, the application and
+the shared Terraform, and no infrastructure of its own. The three phase
+branches are regenerated from this commit."
+  git push origin main
+
+  # 2. each branch is main plus phases 1..N, in order.
+  say "Regenerating the phase branches from main"
+  local n=0
+  for f in "${phases[@]}"; do
+    n=$((n + 1))
+    git checkout -q -B "iac-phase-${n}" main
+    # phases are cumulative: branch N carries files 1..N
+    local m=0
+    for g in "${phases[@]}"; do
+      m=$((m + 1))
+      [ "$m" -le "$n" ] && cp "$stash/$(basename "$g")" "$g"
+    done
+    git add infrastructure/
+    git commit -q -F - <<MSG
+$(phase_title "$n")
+
+$(phase_body "$n")
+MSG
+    git push --force-with-lease origin "iac-phase-${n}"
+    echo "  iac-phase-${n} -> $(git rev-parse --short HEAD)"
   done
 
   git checkout -q main
-  git reset -q --hard "refs/tags/demo-start/main"
-  for b in iac-phase-1 iac-phase-2 iac-phase-3; do
-    git branch -q -f "$b" "refs/tags/demo-start/${b}"
-  done
+  rm -rf "$stash"
 
   say "Opening three fresh pull requests"
   # Merged pull requests cannot be reopened, so these get new numbers every
-  # rehearsal. Nothing depends on the numbers.
-  gh pr create --repo "$REPO" --base main --head iac-phase-1 \
-    --title "Phase 1: the network" \
-    --body "VPC, two public and two private subnets across two Availability Zones, an internet gateway, a NAT gateway and Elastic IP per zone, route tables, and the two security groups." || true
-  gh pr create --repo "$REPO" --base main --head iac-phase-2 \
-    --title "Phase 2: the blueprint" \
-    --body "CloudWatch log group, ECS task execution role and task role, the ECS cluster, and the task definition. Nothing runs yet — registering a recipe is not cooking.
+  # time. Nothing depends on the numbers.
+  for n in 1 2 3; do
+    gh pr create --repo "$REPO" --base main --head "iac-phase-${n}" \
+      --title "$(phase_title "$n")" --body "$(phase_body "$n")" || true
+  done
+}
 
-Stacked on phase 1: merge #1 first." || true
-  gh pr create --repo "$REPO" --base main --head iac-phase-3 \
-    --title "Phase 3: delivery" \
-    --body "ACM certificate for code-busters.huseynov.net validated through DNS, a Route 53 alias record, the load balancer and target group, an HTTPS listener that forwards only that hostname and 404s everything else, and the ECS service.
+phase_title() {
+  case "$1" in
+    1) echo "Phase 1: the network" ;;
+    2) echo "Phase 2: the blueprint" ;;
+    3) echo "Phase 3: delivery" ;;
+  esac
+}
 
-Stacked on phases 1 and 2: merge those first." || true
+phase_body() {
+  case "$1" in
+    1) cat <<'MSG'
+A VPC, two public and two private subnets across two Availability Zones, an
+internet gateway, a NAT gateway and Elastic IP per zone, route tables, and the
+two security groups.
+
+Nothing runs yet. This is the ground to build on.
+MSG
+    ;;
+    2) cat <<'MSG'
+A CloudWatch log group, the ECS task execution role and task role, the ECS
+cluster, and the task definition.
+
+Still nothing running: AWS now knows exactly how to run this container and has
+not been asked to. Registering a recipe is not cooking.
+
+Stacked on phase 1 — merge that first.
+MSG
+    ;;
+    3) cat <<'MSG'
+An ACM certificate for code-busters.huseynov.net validated through DNS, a
+Route 53 alias record, the load balancer and target group, an HTTPS listener
+that forwards only that hostname and answers everything else with a 404, and
+the ECS service that finally runs phase 2's task definition.
+
+Keep the URL open while this applies: the page goes 503 to 200 as the first
+task passes its health check.
+
+Stacked on phases 1 and 2 — merge those first.
+MSG
+    ;;
+  esac
 }
 
 # ---------------------------------------------------------------------------
