@@ -35,10 +35,27 @@ carrying all three phase files, so merging it into `iac-phase-1` hands phase 1
 the entire stack and its pull request proposes everything at once. The
 incremental demo is gone.
 
-Taking the phases off main is a **normal commit**, not a force-push — history
-grows rather than being rewritten. Only the three phase branches are
-force-pushed (`--force-with-lease`), and the repository ruleset blocks
-*deleting* them, which force-pushing is not.
+## Restoring main: force-push dev, never delete it
+
+`main` is restored by force-pushing `dev` onto it:
+
+```bash
+git push --force origin dev:main
+```
+
+One atomic ref update, and the result is byte-identical to the starting line
+rather than "main with some files deleted".
+
+**Do not delete and recreate `main`.** GitHub refuses to delete the default
+branch, so recreating it means repointing the default somewhere else first —
+and that **auto-closes every open pull request**, your phase PRs included,
+then leaves the rulesets and the default-branch setting to be put back. Four
+fragile steps for the same result one gives you.
+
+`dev` is protected against deletion and non-fast-forward pushes, so it can
+only ever move forward. The phase branches are force-pushed with
+`--force-with-lease`; the ruleset on them blocks *deletion*, which a
+force-push is not.
 
 ## Order matters, in one specific way
 

@@ -126,55 +126,50 @@ rewind_git() {
   say "Rewinding the repository"
 
   git fetch --prune origin
-  git checkout -q main
-  git pull -q --ff-only origin main
 
   local phases=(infrastructure/phase-1-network.tf
                 infrastructure/phase-2-compute.tf
                 infrastructure/phase-3-delivery.tf)
 
+  # Take the phase files from main BEFORE main is rewound, so the branches are
+  # rebuilt from whatever was actually rehearsed.
   local stash
   stash="$(mktemp -d)"
   for f in "${phases[@]}"; do
-    if [ ! -f "$f" ]; then
-      echo "ERROR: $f is not on main." >&2
-      echo "main is already at the starting line, or something removed it." >&2
-      echo "Nothing was changed." >&2
+    if ! git show "origin/main:$f" > "$stash/$(basename "$f")" 2>/dev/null; then
+      echo "ERROR: $f is not on origin/main." >&2
+      echo "main may already be at the starting line. Nothing was changed." >&2
       rm -rf "$stash"; exit 1
     fi
-    cp "$f" "$stash/"
   done
 
-  # 1. main goes back to carrying no phases. A normal commit, not a force
-  #    push: history grows instead of being rewritten, so nothing that
-  #    references these commits breaks.
-  say "Taking the phases off main"
-  git rm -q "${phases[@]}"
-  git commit -q -m "Reset: take the phase files back off main
+  # 1. main is restored from dev, which is main-without-phases and is never
+  #    merged into. The result is byte-identical to the starting line rather
+  #    than "main with some files deleted".
+  #
+  #    Force-push, never delete-and-recreate: GitHub refuses to delete the
+  #    default branch, so recreating it means repointing the default first,
+  #    which auto-closes every open pull request and leaves rulesets aimed at
+  #    a branch that briefly does not exist.
+  say "Restoring main from dev"
+  git push --force origin "refs/heads/dev:refs/heads/main"
+  git fetch -q origin
+  git checkout -q main
+  git reset -q --hard origin/main
 
-The demo starts from a main that has every workflow, the application and
-the shared Terraform, and no infrastructure of its own. The three phase
-branches are regenerated from this commit."
-  git push origin main
-
-  # 2. each branch is main plus phases 1..N, in order.
-  say "Regenerating the phase branches from main"
-  local n=0
+  # 2. each branch is dev plus phases 1..N, cumulatively.
+  say "Regenerating the phase branches from dev"
+  local n=0 m
   for f in "${phases[@]}"; do
     n=$((n + 1))
-    git checkout -q -B "iac-phase-${n}" main
-    # phases are cumulative: branch N carries files 1..N
-    local m=0
+    git checkout -q -B "iac-phase-${n}" origin/dev
+    m=0
     for g in "${phases[@]}"; do
       m=$((m + 1))
       [ "$m" -le "$n" ] && cp "$stash/$(basename "$g")" "$g"
     done
     git add infrastructure/
-    git commit -q -F - <<MSG
-$(phase_title "$n")
-
-$(phase_body "$n")
-MSG
+    git commit -q -m "$(phase_title "$n")"
     git push --force-with-lease origin "iac-phase-${n}"
     echo "  iac-phase-${n} -> $(git rev-parse --short HEAD)"
   done
