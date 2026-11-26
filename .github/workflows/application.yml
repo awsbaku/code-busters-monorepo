@@ -141,10 +141,17 @@ jobs:
       - name: Resolve the public URL
         id: url
         run: |
-          dns=$(aws elbv2 describe-load-balancers \
-            --names "${ECS_CLUSTER}" \
-            --query 'LoadBalancers[0].DNSName' --output text)
-          echo "url=http://${dns}" >> "$GITHUB_OUTPUT"
+          # The hostname comes from a repository variable, not from the load
+          # balancer's generated name, because that is the name the audience
+          # sees. Falls back to the ALB's own DNS name before phase 3 lands.
+          if [ -n "${{ vars.APP_URL }}" ]; then
+            echo "url=${{ vars.APP_URL }}" >> "$GITHUB_OUTPUT"
+          else
+            dns=$(aws elbv2 describe-load-balancers \
+              --names "${ECS_CLUSTER}" \
+              --query 'LoadBalancers[0].DNSName' --output text)
+            echo "url=http://${dns}" >> "$GITHUB_OUTPUT"
+          fi
 
       # The deployment is not finished because ECS says the service is
       # stable. It is finished when the public URL serves THIS commit.
