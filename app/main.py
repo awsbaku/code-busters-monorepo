@@ -46,6 +46,27 @@ def version() -> JSONResponse:
     )
 
 
+def _short_host(host: str) -> str:
+    """Reduce a Fargate hostname to the task's private IP.
+
+    Fargate names a task's host after its own address:
+    `ip-10-42-10-168.eu-central-1.compute.internal`. The full name overflows
+    the tile and says nothing the audience cares about. The address does: it
+    is in the 10.42.x range this VPC owns, which is the visible proof that
+    the task sits in a private subnet, and it changes when a task is
+    replaced. Anything that is not a Fargate name is returned untouched.
+    """
+    if host.startswith("ip-"):
+        octets = host.split(".", 1)[0][3:]
+        if octets.count("-") == 3 and all(p.isdigit() for p in octets.split("-")):
+            return octets.replace("-", ".")
+    return host
+
+
+def _task_ip() -> str:
+    return _short_host(socket.gethostname())
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
     return HTMLResponse(
@@ -53,7 +74,7 @@ def index() -> HTMLResponse:
         .replace("{{COMMIT}}", _short(APP_COMMIT))
         .replace("{{COMMIT_FULL}}", APP_COMMIT)
         .replace("{{ENV}}", APP_ENV)
-        .replace("{{HOST}}", socket.gethostname())
+        .replace("{{HOST}}", _task_ip())
     )
 
 
@@ -117,7 +138,8 @@ family=JetBrains+Mono:wght@400;700&family=Open+Sans:wght@400;600;800&display=swa
   .card span{display:block; font-size:12px; letter-spacing:.16em; text-transform:uppercase;
              color:var(--mute); font-weight:600}
   .card strong{display:block; margin-top:8px; font-size:22px; font-weight:700;
-               font-family:'JetBrains Mono',ui-monospace,monospace; color:var(--teal)}
+               font-family:'JetBrains Mono',ui-monospace,monospace; color:var(--teal);
+               overflow-wrap:anywhere; line-height:1.25}
   footer{margin-top:40px; font-size:14px; color:var(--mute)}
   footer code{font-family:'JetBrains Mono',ui-monospace,monospace; color:var(--violet-2)}
   @media (prefers-reduced-motion:reduce){.glow,.dot{animation:none}}
@@ -135,7 +157,7 @@ family=JetBrains+Mono:wght@400;700&family=Open+Sans:wght@400;600;800&display=swa
       <div class="card"><span>Version</span><strong>{{VERSION}}</strong></div>
       <div class="card"><span>Commit</span><strong>{{COMMIT}}</strong></div>
       <div class="card"><span>Environment</span><strong>{{ENV}}</strong></div>
-      <div class="card"><span>Task</span><strong>{{HOST}}</strong></div>
+      <div class="card"><span>Task IP</span><strong>{{HOST}}</strong></div>
     </div>
     <footer>From Commit to AWS Cloud &middot; built with
       <code>GitHub Actions</code> + <code>Terraform</code> + <code>ECS Fargate</code></footer>
