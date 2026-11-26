@@ -33,3 +33,6 @@ app_role_subjects = [
   "repo:awsbaku/code-busters-monorepo:ref:refs/heads/main",
   "repo:awsbaku/code-busters-monorepo:environment:demo-app",
 ]
+
+# Hosted zone the demo's DNS record lives in (public zone, same account).
+hosted_zone_id = "ZXXXXXXXXXXXXXXXXXXXX"

@@ -119,3 +119,15 @@ variable "log_retention_days" {
 
   nullable = false
 }
+
+variable "domain_name" {
+  description = "Public hosted zone that already exists in this account"
+  type        = string
+  default     = "huseynov.net"
+}
+
+variable "subdomain" {
+  description = "Host the demo answers on, prefixed to domain_name"
+  type        = string
+  default     = "code-busters"
+}
