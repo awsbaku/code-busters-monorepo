@@ -66,9 +66,12 @@ Diagrams: `tech-talk-master/talks/code-buster/diagrams/simple/`.
 | `iac-phase-3` | Load balancer, target group, listener, ECS service | 4 |
 
 Each phase adds exactly one new file and edits nothing that exists, so every
-pull request diff is purely the new infrastructure. `main` is the deployment
-branch: merging a phase applies it. Full walkthrough in
-[`docs/PHASES.md`](docs/PHASES.md).
+pull request diff is purely the new infrastructure. The branches are stacked
+and **must be merged in order**: a pull request is validated against `main`
+plus the branch, so a later phase needs its predecessors present.
+
+`main` is the deployment branch: merging a phase applies it. Full walkthrough
+in [`docs/PHASES.md`](docs/PHASES.md).
 
 ## Running it
 

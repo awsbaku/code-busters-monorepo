@@ -103,6 +103,8 @@ data "aws_iam_policy_document" "terraform_provision" {
       "ec2:*RouteTable*",
       "ec2:*Route",
       "ec2:*InternetGateway*",
+      "ec2:*NatGateway*",
+      "ec2:*Address*",
       "ec2:*SecurityGroup*",
       "ec2:*Tags",
       "ec2:Describe*",
@@ -111,8 +113,34 @@ data "aws_iam_policy_document" "terraform_provision" {
       "ecr:*",
       "logs:*",
       "application-autoscaling:*",
+      # Phase 3 requests a TLS certificate and proves ownership by writing a
+      # validation record. ACM certificates cannot be tagged by Terraform
+      # before they exist, so these stay account-wide; Route 53 does not.
+      "acm:RequestCertificate",
+      "acm:DescribeCertificate",
+      "acm:DeleteCertificate",
+      "acm:ListCertificates",
+      "acm:AddTagsToCertificate",
+      "acm:ListTagsForCertificate",
+      "route53:GetChange",
+      "route53:ListHostedZones",
+      "route53:ListHostedZonesByName",
     ]
     resources = ["*"]
+  }
+
+  # DNS is the one piece of this demo that touches something the speaker
+  # actually owns. The role may read and write records in exactly one hosted
+  # zone — huseynov.net — and in no other.
+  statement {
+    sid    = "ManageOneHostedZone"
+    effect = "Allow"
+    actions = [
+      "route53:ChangeResourceRecordSets",
+      "route53:ListResourceRecordSets",
+      "route53:GetHostedZone",
+    ]
+    resources = ["arn:aws:route53:::hostedzone/${var.hosted_zone_id}"]
   }
 
   # Terraform creates the ECS task and execution roles, so it needs IAM. The
