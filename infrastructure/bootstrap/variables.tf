@@ -107,3 +107,8 @@ variable "app_role_subjects" {
 
   nullable = false
 }
+
+variable "hosted_zone_id" {
+  description = "Route 53 hosted zone the infrastructure role may write records into"
+  type        = string
+}

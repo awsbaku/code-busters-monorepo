@@ -11,10 +11,21 @@ with no noise around it.
 | `iac-phase-2` | `infrastructure/phase-2-compute.tf` | Log group, task execution role + policy attachment, task role, ECS cluster, task definition | 6 | ~20 s |
 | `iac-phase-3` | `infrastructure/phase-3-delivery.tf` | ALB, target group, listener, ECS service | 4 | ~4 min |
 
-The branches are independent — each one is cut from `main` and touches a
-different file, so there are no merge conflicts and no stacking.
-**Phase 3 must be merged last**, because it is the only one that references
-the other two. Phases 1 and 2 are independent of each other.
+**The branches are stacked**: `iac-phase-2` contains phase 1, and
+`iac-phase-3` contains phases 1 and 2. They have to be, and this was proven
+the hard way — GitHub validates a pull request against **main plus the
+branch**, so an independent phase-3 branch plans against a main with no VPC
+in it and fails on undeclared resources.
+
+**Merge them in order: 1, then 2, then 3.** Each pull request's diff still
+reduces to exactly that phase's one new file once the earlier phases are in
+`main`, which is the state the audience sees it in.
+
+One consequence worth knowing before you present: **a later phase's plan
+counts everything not yet merged.** Right now PR #2 plans 32 resources and
+PR #3 plans 36, because neither predecessor is merged. After merging #1, PR
+#2 re-plans at 6. After merging #2, PR #3 re-plans at 4. The numbers in the
+table above are what the room will see, provided you merge in order.
 
 ## The loop, for each phase
 
