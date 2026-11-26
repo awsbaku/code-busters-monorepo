@@ -19,11 +19,15 @@ Four git tags pin the starting line. They were pushed before the first
 rehearsal and should never move:
 
 ```
-demo-start/main            e293771
+demo-start/main            (moves when main gains tooling; the tag is the truth)
 demo-start/iac-phase-1     b4ee25b
 demo-start/iac-phase-2     9787231
 demo-start/iac-phase-3     89172b2
 ```
+
+Read them with `git rev-parse --short demo-start/main` rather than trusting
+this page — `main` legitimately moves when tooling lands on it, and the tag is
+re-pointed at the same time.
 
 The rewind is a force-push of each tag onto its branch. `main` has no branch
 protection, which is what makes this possible — and is also why nobody else
