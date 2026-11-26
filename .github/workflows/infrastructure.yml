@@ -11,7 +11,7 @@
 #
 # Action versions below are real release tags. Pin them to full commit SHAs
 # before the live demo:
-#   gh api repos/actions/checkout/git/ref/tags/v4 --jq .object.sha
+#   gh api repos/actions/checkout/git/ref/tags/v7 --jq .object.sha
 # ---------------------------------------------------------------------------
 name: infrastructure
 
@@ -51,9 +51,9 @@ jobs:
     name: fmt and validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -90,9 +90,9 @@ jobs:
       pull-requests: write   # post the plan summary
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
@@ -100,7 +100,7 @@ jobs:
       # token describing this exact workflow run, AWS checks it against the
       # role's trust policy, and hands back credentials valid for one hour.
       - name: Assume the Terraform role via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -150,14 +150,14 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Assume the Terraform role via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
