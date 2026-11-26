@@ -170,12 +170,22 @@ rewind_git() {
 
   # Take the phase files from main BEFORE main is rewound, so the branches are
   # rebuilt from whatever was actually rehearsed.
+  # Source the phase files from main while it still has them. If main has
+  # already been rewound — a re-run, or a reset finished by hand — fall back
+  # to iac-phase-3, which carries all three by construction. That makes this
+  # function safe to run twice.
+  local src="origin/main"
+  if ! git cat-file -e "origin/main:${phases[2]}" 2>/dev/null; then
+    src="origin/iac-phase-3"
+    echo "  main is already rewound; taking the phase files from ${src}"
+  fi
+
   local stash
   stash="$(mktemp -d)"
   for f in "${phases[@]}"; do
-    if ! git show "origin/main:$f" > "$stash/$(basename "$f")" 2>/dev/null; then
-      echo "ERROR: $f is not on origin/main." >&2
-      echo "main may already be at the starting line. Nothing was changed." >&2
+    if ! git show "${src}:$f" > "$stash/$(basename "$f")" 2>/dev/null; then
+      echo "ERROR: $f is on neither origin/main nor origin/iac-phase-3." >&2
+      echo "Nothing was changed." >&2
       rm -rf "$stash"; exit 1
     fi
   done
