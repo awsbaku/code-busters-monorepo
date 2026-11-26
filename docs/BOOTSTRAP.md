@@ -61,37 +61,35 @@ one hour. Read the claim from CloudTrail instead.
 Put the verified values in `infra_role_subjects` and `app_role_subjects`,
 then apply.
 
-## Step 3 — move the bootstrap's own state into the bucket it created
+## Step 3 — the bootstrap state stays local, on purpose
 
-This is the part worth showing on stage. The bucket now exists, so the stack
-that created it can finally use it:
+**Do not migrate it into the bucket.** The bootstrap keeps its state in
+`infrastructure/bootstrap/terraform.tfstate` on the machine that ran it.
 
-```bash
-cd infrastructure/bootstrap
-terraform output -raw state_bucket          # note the name
+The tempting move is to point the bootstrap at the bucket it just created, so
+that "nothing is left on a laptop". It closes a satisfying loop and it makes
+teardown genuinely painful: the state describing the bucket would live inside
+that same bucket, so destroying it means first migrating the state back out,
+emptying every object version by hand, and only then running `destroy`. A
+re-runnable demo is worth more than a tidy loop.
 
-cat > backend.tf <<EOF
-terraform {
-  backend "s3" {
-    bucket       = "<the name above>"
-    key          = "bootstrap/terraform.tfstate"
-    region       = "eu-central-1"
-    encrypt      = true
-    use_lockfile = true
-  }
-}
-EOF
+What this costs, stated plainly:
 
-terraform init -migrate-state    # answer yes
-rm -f terraform.tfstate terraform.tfstate.backup
-```
+- **One file matters.** `terraform.tfstate` here is git-ignored and exists in
+  exactly one place. Lose it and the roles, bucket and ECR repository are
+  orphaned — still running, no longer managed. Back it up before the talk.
+- **No locking on the bootstrap.** Fine, because one person runs it once,
+  by hand. It is not what the pipeline touches.
 
-The bucket now holds the state of the code that created it. The loop is
-closed, and nothing is left on a laptop.
+The split that matters:
 
-`backend.tf` here is git-ignored because it contains an account-specific
-bucket name; the root stack handles the same thing with `-backend-config`
-flags instead.
+| Stack | State | Why |
+|---|---|---|
+| `infrastructure/bootstrap/` | **local file** | run once by hand; must stay destroyable |
+| `infrastructure/` (the phases) | **S3 + `use_lockfile`** | GitHub Actions runs it; needs shared state and a lock |
+
+So the bucket this step created holds exactly one key — `demo/terraform.tfstate`,
+the phases — and never its own.
 
 ## Step 4 — tell GitHub about the roles
 

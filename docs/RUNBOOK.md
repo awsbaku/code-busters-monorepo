@@ -62,14 +62,36 @@ order, with phase 3 last.
 
 ## Teardown
 
+Order matters: the phases first, the bootstrap last.
+
 ```bash
+# 1. the phases. State is in S3, so nothing special is needed.
 cd infrastructure
 terraform destroy
 
+# 2. the bootstrap. State is a LOCAL file (decision D8) — no migration
+#    dance, but the bucket and the ECR repository must be emptied first,
+#    because Terraform will not delete either while it holds objects.
 cd bootstrap
-# the state bucket has versioning on, so it must be emptied including versions
+BUCKET=$(terraform output -raw state_bucket)
+
+# versioned bucket: delete markers and old versions count as objects
+aws s3api delete-objects --bucket "$BUCKET" --delete "$(aws s3api \
+  list-object-versions --bucket "$BUCKET" \
+  --query '{Objects: [].{Key:Key,VersionId:VersionId}}' \
+  --output json)" 2>/dev/null || true
+
+# the seed image, and anything the app pipeline pushed
+aws ecr batch-delete-image --repository-name code-busters-demo \
+  --image-ids "$(aws ecr list-images --repository-name code-busters-demo \
+  --query 'imageIds' --output json)" 2>/dev/null || true
+
 terraform destroy
 ```
+
+The OIDC provider is **not** destroyed: this account's provider predates the
+demo and is shared with other projects, so the bootstrap only references it
+(`create_oidc_provider = false`). Destroying it would break them.
 
 Check afterwards that both Elastic IPs were released — an unattached
 Elastic IP keeps billing:
