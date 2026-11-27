@@ -149,7 +149,7 @@ family=JetBrains+Mono:wght@400;700&family=Open+Sans:wght@400;600;800&display=swa
   <div class="glow a"></div><div class="glow b"></div>
   <main>
     <div class="badge"><span class="dot"></span>Live on AWS Fargate</div>
-    <h1>Hello,<br><em>Code Busters</em></h1>
+    <h1>Hello there,<br><em>Code Busters!</em></h1>
     <p class="lede">This page was a commit a few minutes ago. GitHub Actions tested it,
        built it into a container, pushed it to Amazon ECR and rolled it out, with no
        AWS access keys anywhere.</p>
