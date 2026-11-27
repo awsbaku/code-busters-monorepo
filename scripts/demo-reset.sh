@@ -217,7 +217,7 @@ rewind_git() {
     done
     git add infrastructure/
     git commit -q -m "$(phase_title "$n")"
-    git push --force-with-lease origin "iac-phase-${n}"
+    git push --force-with-lease -u origin "iac-phase-${n}"
     echo "  iac-phase-${n} -> $(git rev-parse --short HEAD)"
   done
 
